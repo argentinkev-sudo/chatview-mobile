@@ -1,0 +1,240 @@
+/* App.css */
+
+/* Reset basique */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+  background-color: #1e1e1e;
+  color: #f0f0f0;
+  overflow-x: hidden;
+}
+
+/* Chat principal */
+.chat {
+  display: flex;
+  height: 100vh;
+  width: 100%;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 250px;
+  background-color: #2b2b2b;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  overflow-y: auto;
+}
+
+.channel-item, .voice-user-item-sidebar {
+  padding: 5px 10px;
+  margin-bottom: 5px;
+  cursor: pointer;
+  border-radius: 5px;
+}
+
+.channel-item.active, .voice-user-item-sidebar.active {
+  background-color: #444;
+}
+
+.channel-badge, .friends-badge {
+  background-color: #ff3b30;
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 12px;
+  font-size: 12px;
+  margin-left: 5px;
+}
+
+/* Messages */
+.messages {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  overflow-y: auto;
+  background-color: #121212;
+}
+
+.msg {
+  margin-bottom: 8px;
+}
+
+.msg-content {
+  display: inline-block;
+  padding: 5px 10px;
+  background-color: #2b2b2b;
+  border-radius: 5px;
+}
+
+.msg-time {
+  font-size: 10px;
+  color: #888;
+  margin-left: 5px;
+}
+
+.msg-edited {
+  font-size: 10px;
+  color: #aaa;
+  margin-left: 3px;
+}
+
+/* Input */
+input#msg-input {
+  width: 100%;
+  padding: 10px;
+  border-radius: 5px;
+  border: none;
+  background-color: #2b2b2b;
+  color: #f0f0f0;
+  outline: none;
+}
+
+/* Boutons */
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 5px;
+  padding: 5px 10px;
+  background-color: #444;
+  color: #fff;
+  transition: all 0.2s;
+}
+
+button:hover {
+  background-color: #555;
+}
+
+button.active {
+  background-color: #007bff;
+}
+
+/* Voix */
+.voice-user-avatar-small {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  margin-right: 5px;
+}
+
+.voice-user-avatar-small.speaking {
+  box-shadow: 0 0 8px #00ff00;
+}
+
+/* Flux vidéo */
+.stream-box {
+  position: relative;
+  width: 200px;
+  height: 150px;
+  margin: 10px;
+  background-color: #111;
+  border: 1px solid #333;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.stream-box video.remote-video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.stream-close-btn {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background-color: rgba(255, 0, 0, 0.8);
+  border-radius: 50%;
+  width: 20px;
+  height: 20px;
+  color: #fff;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.stream-quality-toggle {
+  position: absolute;
+  bottom: 2px;
+  left: 2px;
+  font-size: 10px;
+}
+
+/* Emoji/GIF picker */
+#emoji-picker {
+  position: absolute;
+  bottom: 50px;
+  right: 10px;
+  width: 320px;
+  max-height: 400px;
+  background-color: #2b2b2b;
+  border: 1px solid #444;
+  border-radius: 5px;
+  overflow-y: auto;
+  padding: 10px;
+  display: none;
+  z-index: 1000;
+}
+
+.emoji-grid, .gif-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 32px);
+  gap: 5px;
+}
+
+.emoji-item, .gif-item {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.emoji-item:hover, .gif-item:hover {
+  background-color: #444;
+  border-radius: 5px;
+}
+
+/* Tabs emoji/gif */
+.emoji-tab {
+  display: inline-block;
+  padding: 5px 10px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.emoji-tab.active {
+  border-bottom: 2px solid #007bff;
+}
+
+/* Modals */
+#screen-source-modal {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.screen-source-item {
+  cursor: pointer;
+  margin: 5px;
+  text-align: center;
+  color: #fff;
+}
+
+.screen-source-item img {
+  width: 160px;
+  height: 90px;
+  object-fit: cover;
+  border-radius: 5px;
+  border: 1px solid #444;
+}
