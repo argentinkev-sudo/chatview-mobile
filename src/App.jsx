@@ -315,24 +315,11 @@ function ChatApp({ auth, onLogout }) {
   const createPeerNative = async (peerId, initiator, username, s) => {
     const pc = new RTCPeerConnection({
       iceServers: [
-        { urls: "stun:stun.l.google.com:19302" },
-        { urls: "stun:stun1.l.google.com:19302" },
-        { urls: "stun:stun2.l.google.com:19302" },
-        {
-          urls: "turn:openrelay.metered.ca:80",
-          username: "openrelayproject",
-          credential: "openrelayproject"
-        },
-        {
-          urls: "turn:openrelay.metered.ca:443",
-          username: "openrelayproject",
-          credential: "openrelayproject"
-        },
-        {
-          urls: "turn:openrelay.metered.ca:443?transport=tcp",
-          username: "openrelayproject",
-          credential: "openrelayproject"
-        }
+        { urls: "stun:stun.relay.metered.ca:80" },
+        { urls: "turn:global.relay.metered.ca:80", username: "ac2c93513b982ade0cd857b1", credential: "eKC+3dSGWH6uzm5t" },
+        { urls: "turn:global.relay.metered.ca:80?transport=tcp", username: "ac2c93513b982ade0cd857b1", credential: "eKC+3dSGWH6uzm5t" },
+        { urls: "turn:global.relay.metered.ca:443", username: "ac2c93513b982ade0cd857b1", credential: "eKC+3dSGWH6uzm5t" },
+        { urls: "turns:global.relay.metered.ca:443?transport=tcp", username: "ac2c93513b982ade0cd857b1", credential: "eKC+3dSGWH6uzm5t" },
       ],
       iceCandidatePoolSize: 10
     });
