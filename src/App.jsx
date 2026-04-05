@@ -167,14 +167,20 @@ function ChatApp({ auth, onLogout }) {
       const ch = currentVoiceChannelRef.current;
       if (ch && state[ch]) setVoiceUsers(state[ch]);
     });
+    // voice_peers = on arrive dans un salon déjà occupé → on crée les offres
     s.on("voice_peers", async (list) => {
       for (const { peerId, username } of list) await createPeerNative(peerId, true, username, s);
     });
+    // peer_joined = quelqu'un arrive après nous → on attend son offre
     s.on("peer_joined", async ({ peerId, username }) => {
       await createPeerNative(peerId, false, username, s);
       joinSound.play().catch(()=>{});
     });
     s.on("signal", async ({ from, signal }) => {
+      // Créer le peer si pas encore existant (cas où bureau envoie l'offre en premier)
+      if (!peersRef.current[from]) {
+        await createPeerNative(from, false, "unknown", s);
+      }
       const peerData = peersRef.current[from];
       if (!peerData) return;
       const pc = peerData.pc;
@@ -185,9 +191,13 @@ function ChatApp({ auth, onLogout }) {
           await pc.setLocalDescription(answer);
           s.emit("signal", { to: from, signal: pc.localDescription });
         } else if (signal.type === "answer") {
-          await pc.setRemoteDescription(new RTCSessionDescription(signal));
-        } else if (signal.candidate) {
-          await pc.addIceCandidate(new RTCIceCandidate(signal));
+          if (pc.signalingState === "have-local-offer") {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal));
+          }
+        } else if (signal.candidate !== undefined) {
+          try {
+            if (signal.candidate) await pc.addIceCandidate(new RTCIceCandidate(signal));
+          } catch(e) { /* ignore ice errors */ }
         }
       } catch(e) { console.error("Signal error:", e); }
     });
@@ -196,6 +206,8 @@ function ChatApp({ auth, onLogout }) {
         peersRef.current[peerId].pc.close();
         delete peersRef.current[peerId];
       }
+      const audioEl = document.getElementById("audio-" + peerId);
+      if (audioEl) audioEl.remove();
       leaveSound.play().catch(()=>{});
     });
     s.on("channel_created", (ch) => {
