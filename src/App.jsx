@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import io from "socket.io-client";
-import SimplePeer from "simple-peer";
 import "./App.css";
 
 const SERVER_URL = "https://chatapp-server-e97e.onrender.com";
+
+// ─── SONS ────────────────────────────────────────────────────────────────────
+const joinSound = new Audio("https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3");
+const leaveSound = new Audio("https://assets.mixkit.co/active_storage/sfx/2870/2870-preview.mp3");
+joinSound.volume = 0.5;
+leaveSound.volume = 0.5;
 
 // ─── HELPERS ────────────────────────────────────────────────────────────────
 function escapeHtml(str = "") {
@@ -163,16 +168,35 @@ function ChatApp({ auth, onLogout }) {
       if (ch && state[ch]) setVoiceUsers(state[ch]);
     });
     s.on("voice_peers", async (list) => {
-      for (const { peerId, username } of list) await createPeer(peerId, true, username, s);
+      for (const { peerId, username } of list) await createPeerNative(peerId, true, username, s);
     });
     s.on("peer_joined", async ({ peerId, username }) => {
-      await createPeer(peerId, false, username, s);
+      await createPeerNative(peerId, false, username, s);
+      joinSound.play().catch(()=>{});
     });
-    s.on("signal", ({ from, signal }) => {
-      if (peersRef.current[from]) peersRef.current[from].peer.signal(signal);
+    s.on("signal", async ({ from, signal }) => {
+      const peerData = peersRef.current[from];
+      if (!peerData) return;
+      const pc = peerData.pc;
+      try {
+        if (signal.type === "offer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          s.emit("signal", { to: from, signal: pc.localDescription });
+        } else if (signal.type === "answer") {
+          await pc.setRemoteDescription(new RTCSessionDescription(signal));
+        } else if (signal.candidate) {
+          await pc.addIceCandidate(new RTCIceCandidate(signal));
+        }
+      } catch(e) { console.error("Signal error:", e); }
     });
     s.on("peer_left", ({ peerId }) => {
-      if (peersRef.current[peerId]) { peersRef.current[peerId].peer.destroy(); delete peersRef.current[peerId]; }
+      if (peersRef.current[peerId]) {
+        peersRef.current[peerId].pc.close();
+        delete peersRef.current[peerId];
+      }
+      leaveSound.play().catch(()=>{});
     });
     s.on("channel_created", (ch) => {
       setChannels(prev => ({
@@ -249,6 +273,7 @@ function ChatApp({ auth, onLogout }) {
       setCurrentVoiceChannel(ch.id);
       currentVoiceChannelRef.current = ch.id;
       socketRef.current.emit("join_voice", ch.id);
+      joinSound.play().catch(()=>{});
       setView("voice");
       setShowSidebar(false);
     } catch { alert("Impossible d'accéder au micro !"); }
@@ -258,27 +283,64 @@ function ChatApp({ auth, onLogout }) {
     if (!currentVoiceChannel) return;
     socketRef.current.emit("leave_voice", currentVoiceChannel);
     if (localStreamRef.current) { localStreamRef.current.getTracks().forEach(t=>t.stop()); localStreamRef.current = null; }
-    Object.keys(peersRef.current).forEach(id => peersRef.current[id].peer.destroy());
+    Object.keys(peersRef.current).forEach(id => { peersRef.current[id].pc.close(); });
     peersRef.current = {};
+    // Supprimer les éléments audio
+    document.querySelectorAll(".remote-audio-el").forEach(a => a.remove());
     setCurrentVoiceChannel(null);
     setVoiceUsers([]);
+    leaveSound.play().catch(()=>{});
     setView("channels");
   };
 
-  const createPeer = async (peerId, initiator, username, s) => {
-    const peer = new SimplePeer({
-      initiator, stream: localStreamRef.current, trickle: true,
-      config: { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] }
+  const createPeerNative = async (peerId, initiator, username, s) => {
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: "stun:stun.l.google.com:19302" },
+        { urls: "stun:stun1.l.google.com:19302" },
+      ]
     });
-    peer.on("signal", signal => s.emit("signal", { to: peerId, signal }));
-    peer.on("stream", stream => {
-      if (stream.getVideoTracks().length === 0) {
-        const audio = document.createElement("audio");
-        audio.autoplay = true; audio.srcObject = stream;
-        document.body.appendChild(audio);
+
+    // Ajouter le stream local
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach(track => {
+        pc.addTrack(track, localStreamRef.current);
+      });
+    }
+
+    // ICE candidates
+    pc.onicecandidate = (e) => {
+      if (e.candidate) {
+        s.emit("signal", { to: peerId, signal: e.candidate });
       }
-    });
-    peersRef.current[peerId] = { peer, username };
+    };
+
+    // Recevoir le stream distant
+    pc.ontrack = (e) => {
+      const stream = e.streams[0];
+      if (!stream) return;
+      // Supprimer ancien élément audio si existe
+      const old = document.getElementById("audio-" + peerId);
+      if (old) old.remove();
+      const audio = document.createElement("audio");
+      audio.id = "audio-" + peerId;
+      audio.className = "remote-audio-el";
+      audio.autoplay = true;
+      audio.playsInline = true;
+      audio.srcObject = stream;
+      document.body.appendChild(audio);
+    };
+
+    peersRef.current[peerId] = { pc, username };
+
+    // Si initiateur, créer l'offre
+    if (initiator) {
+      try {
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        s.emit("signal", { to: peerId, signal: pc.localDescription });
+      } catch(e) { console.error("Offer error:", e); }
+    }
   };
 
   const toggleMute = () => {

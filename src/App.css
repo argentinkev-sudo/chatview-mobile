@@ -435,12 +435,13 @@ a { color: var(--accent); text-decoration: underline; }
 .channel-card.voice.active { background: rgba(35,165,89,0.1); }
 
 .channel-card-hash {
-  font-size: 16px;
+  font-size: 14px;
   color: var(--t3);
   font-weight: 700;
   flex-shrink: 0;
-  width: 20px;
+  width: 18px;
   text-align: center;
+  display: none;
 }
 .channel-card-name { font-size: 15px; font-weight: 500; color: var(--t1); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .channel-card-sub { font-size: 12px; color: var(--green); font-weight: 500; flex-shrink: 0; }
