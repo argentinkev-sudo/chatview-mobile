@@ -541,10 +541,8 @@ function HomeView({ channels, currentChannel, currentVoiceChannel, unreadCounts,
           </div>
           {channels.text?.map(ch => (
             <div key={ch.id} className={`channel-card ${currentChannel===ch.id?"active":""}`} onClick={()=>onJoinText(ch)}>
-              <div className="channel-card-icon">#</div>
-              <div className="channel-card-info">
-                <span className="channel-card-name">{ch.name}</span>
-              </div>
+              <span className="channel-card-hash">#</span>
+              <span className="channel-card-name">{ch.name}</span>
               {unreadCounts[ch.id] > 0 && (
                 <span className="channel-badge">{unreadCounts[ch.id]>99?"99+":unreadCounts[ch.id]}</span>
               )}
@@ -560,11 +558,9 @@ function HomeView({ channels, currentChannel, currentVoiceChannel, unreadCounts,
           </div>
           {channels.voice?.map(ch => (
             <div key={ch.id} className={`channel-card ${currentVoiceChannel===ch.id?"active voice":""}`} onClick={()=>onJoinVoice(ch)}>
-              <div className="channel-card-icon">🔊</div>
-              <div className="channel-card-info">
-                <span className="channel-card-name">{ch.name}</span>
-                {currentVoiceChannel===ch.id && <span className="channel-card-sub">Connecté</span>}
-              </div>
+              <span className="channel-card-hash">🔊</span>
+              <span className="channel-card-name">{ch.name}</span>
+              {currentVoiceChannel===ch.id && <span className="channel-card-sub">Connecté</span>}
               <span className="channel-card-arrow">›</span>
             </div>
           ))}
