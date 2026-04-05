@@ -177,7 +177,7 @@ function ChatApp({ auth, onLogout }) {
       joinSound.play().catch(()=>{});
     });
     s.on("signal", async ({ from, signal }) => {
-      console.log("📡 Signal reçu de", from, "type:", signal.type, "candidate:", !!signal.candidate, "full:", JSON.stringify(signal).substring(0,200));
+      console.log("📡 Signal reçu de", from, "type:", signal.type, "candidate:", !!signal.candidate);
       if (!peersRef.current[from]) {
         console.log("🆕 Création peer pour", from);
         await createPeerNative(from, false, "unknown", s);
@@ -189,6 +189,12 @@ function ChatApp({ auth, onLogout }) {
       try {
         if (signal.type === "offer") {
           await pc.setRemoteDescription(new RTCSessionDescription(signal));
+          // Appliquer les candidates en attente
+          const pending = pendingCandidatesRef.current[from] || [];
+          for (const c of pending) {
+            try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch(e) {}
+          }
+          pendingCandidatesRef.current[from] = [];
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           s.emit("signal", { to: from, signal: pc.localDescription });
@@ -196,15 +202,26 @@ function ChatApp({ auth, onLogout }) {
         } else if (signal.type === "answer") {
           if (pc.signalingState === "have-local-offer") {
             await pc.setRemoteDescription(new RTCSessionDescription(signal));
-            console.log("✅ Answer reçu et appliqué");
+            // Appliquer les candidates en attente
+            const pending = pendingCandidatesRef.current[from] || [];
+            for (const c of pending) {
+              try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch(e) {}
+            }
+            pendingCandidatesRef.current[from] = [];
+            console.log("✅ Answer reçu et appliqué, candidates en attente:", pending.length);
           }
         } else if (signal.candidate !== undefined) {
-          try {
-            if (signal.candidate) await pc.addIceCandidate(new RTCIceCandidate(signal));
-            console.log("✅ ICE candidate ajouté");
-          } catch(e) { console.warn("ICE error:", e.message); }
-        } else {
-          console.warn("❓ Signal inconnu:", signal);
+          if (pc.remoteDescription) {
+            try {
+              if (signal.candidate) await pc.addIceCandidate(new RTCIceCandidate(signal));
+              console.log("✅ ICE candidate ajouté");
+            } catch(e) { console.warn("ICE error:", e.message); }
+          } else {
+            // Mettre en attente
+            if (!pendingCandidatesRef.current[from]) pendingCandidatesRef.current[from] = [];
+            pendingCandidatesRef.current[from].push(signal);
+            console.log("⏳ ICE candidate mis en attente");
+          }
         }
       } catch(e) { console.error("Signal error:", e); }
     });
@@ -312,6 +329,8 @@ function ChatApp({ auth, onLogout }) {
     setView("channels");
   };
 
+  const pendingCandidatesRef = useRef({});
+
   const createPeerNative = async (peerId, initiator, username, s) => {
     const pc = new RTCPeerConnection({
       iceServers: [
@@ -323,6 +342,9 @@ function ChatApp({ auth, onLogout }) {
       ],
       iceCandidatePoolSize: 10
     });
+
+    // Init pending candidates queue
+    pendingCandidatesRef.current[peerId] = [];
 
     // Ajouter le stream local
     if (localStreamRef.current) {
