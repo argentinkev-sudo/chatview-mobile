@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import io from "socket.io-client";
+import SimplePeer from "simple-peer";
 import "./App.css";
 
 const SERVER_URL = "https://chatapp-server-e97e.onrender.com";
@@ -167,67 +168,23 @@ function ChatApp({ auth, onLogout }) {
       const ch = currentVoiceChannelRef.current;
       if (ch && state[ch]) setVoiceUsers(state[ch]);
     });
-    // voice_peers = on arrive dans un salon déjà occupé → on crée les offres
+    // voice_peers = on arrive dans un salon déjà occupé → on est initiateur
     s.on("voice_peers", async (list) => {
-      for (const { peerId, username } of list) await createPeerNative(peerId, true, username, s);
+      for (const { peerId, username } of list) createPeerSP(peerId, true, username, s);
     });
-    // peer_joined = quelqu'un arrive après nous → on attend son offre
+    // peer_joined = quelqu'un arrive après nous → pas initiateur
     s.on("peer_joined", async ({ peerId, username }) => {
-      await createPeerNative(peerId, false, username, s);
+      createPeerSP(peerId, false, username, s);
       joinSound.play().catch(()=>{});
     });
-    s.on("signal", async ({ from, signal }) => {
-      console.log("📡 Signal reçu de", from, "type:", signal.type, "candidate:", !!signal.candidate);
-      if (!peersRef.current[from]) {
-        console.log("🆕 Création peer pour", from);
-        await createPeerNative(from, false, "unknown", s);
+    s.on("signal", ({ from, signal }) => {
+      if (peersRef.current[from]) {
+        peersRef.current[from].peer.signal(signal);
       }
-      const peerData = peersRef.current[from];
-      if (!peerData) return;
-      const pc = peerData.pc;
-      console.log("📶 signalingState avant:", pc.signalingState);
-      try {
-        if (signal.type === "offer") {
-          await pc.setRemoteDescription(new RTCSessionDescription(signal));
-          // Appliquer les candidates en attente
-          const pending = pendingCandidatesRef.current[from] || [];
-          for (const c of pending) {
-            try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch(e) {}
-          }
-          pendingCandidatesRef.current[from] = [];
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          s.emit("signal", { to: from, signal: pc.localDescription });
-          console.log("✅ Answer envoyé");
-        } else if (signal.type === "answer") {
-          if (pc.signalingState === "have-local-offer") {
-            await pc.setRemoteDescription(new RTCSessionDescription(signal));
-            // Appliquer les candidates en attente
-            const pending = pendingCandidatesRef.current[from] || [];
-            for (const c of pending) {
-              try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch(e) {}
-            }
-            pendingCandidatesRef.current[from] = [];
-            console.log("✅ Answer reçu et appliqué, candidates en attente:", pending.length);
-          }
-        } else if (signal.candidate !== undefined) {
-          if (pc.remoteDescription) {
-            try {
-              if (signal.candidate) await pc.addIceCandidate(new RTCIceCandidate(signal));
-              console.log("✅ ICE candidate ajouté");
-            } catch(e) { console.warn("ICE error:", e.message); }
-          } else {
-            // Mettre en attente
-            if (!pendingCandidatesRef.current[from]) pendingCandidatesRef.current[from] = [];
-            pendingCandidatesRef.current[from].push(signal);
-            console.log("⏳ ICE candidate mis en attente");
-          }
-        }
-      } catch(e) { console.error("Signal error:", e); }
     });
     s.on("peer_left", ({ peerId }) => {
       if (peersRef.current[peerId]) {
-        peersRef.current[peerId].pc.close();
+        peersRef.current[peerId].peer.destroy();
         delete peersRef.current[peerId];
       }
       const audioEl = document.getElementById("audio-" + peerId);
@@ -319,9 +276,8 @@ function ChatApp({ auth, onLogout }) {
     if (!currentVoiceChannel) return;
     socketRef.current.emit("leave_voice", currentVoiceChannel);
     if (localStreamRef.current) { localStreamRef.current.getTracks().forEach(t=>t.stop()); localStreamRef.current = null; }
-    Object.keys(peersRef.current).forEach(id => { peersRef.current[id].pc.close(); });
+    Object.keys(peersRef.current).forEach(id => { peersRef.current[id].peer.destroy(); });
     peersRef.current = {};
-    // Supprimer les éléments audio
     document.querySelectorAll(".remote-audio-el").forEach(a => a.remove());
     setCurrentVoiceChannel(null);
     setVoiceUsers([]);
@@ -329,42 +285,23 @@ function ChatApp({ auth, onLogout }) {
     setView("channels");
   };
 
-  const pendingCandidatesRef = useRef({});
-
-  const createPeerNative = async (peerId, initiator, username, s) => {
-    const pc = new RTCPeerConnection({
-      iceServers: [
-        { urls: "stun:stun.relay.metered.ca:80" },
-        { urls: "turn:global.relay.metered.ca:80", username: "ac2c93513b982ade0cd857b1", credential: "eKC+3dSGWH6uzm5t" },
-        { urls: "turn:global.relay.metered.ca:80?transport=tcp", username: "ac2c93513b982ade0cd857b1", credential: "eKC+3dSGWH6uzm5t" },
-        { urls: "turn:global.relay.metered.ca:443", username: "ac2c93513b982ade0cd857b1", credential: "eKC+3dSGWH6uzm5t" },
-        { urls: "turns:global.relay.metered.ca:443?transport=tcp", username: "ac2c93513b982ade0cd857b1", credential: "eKC+3dSGWH6uzm5t" },
-      ],
-      iceCandidatePoolSize: 10
-    });
-
-    // Init pending candidates queue
-    pendingCandidatesRef.current[peerId] = [];
-
-    // Ajouter le stream local
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => {
-        pc.addTrack(track, localStreamRef.current);
-      });
-    }
-
-    // ICE candidates
-    pc.onicecandidate = (e) => {
-      if (e.candidate) {
-        s.emit("signal", { to: peerId, signal: e.candidate });
+  const createPeerSP = (peerId, initiator, username, s) => {
+    const peer = new SimplePeer({
+      initiator,
+      stream: localStreamRef.current,
+      trickle: true,
+      config: {
+        iceServers: [
+          { urls: "stun:stun.relay.metered.ca:80" },
+          { urls: "turn:global.relay.metered.ca:80", username: "ac2c93513b982ade0cd857b1", credential: "eKC+3dSGWH6uzm5t" },
+          { urls: "turn:global.relay.metered.ca:80?transport=tcp", username: "ac2c93513b982ade0cd857b1", credential: "eKC+3dSGWH6uzm5t" },
+          { urls: "turn:global.relay.metered.ca:443", username: "ac2c93513b982ade0cd857b1", credential: "eKC+3dSGWH6uzm5t" },
+          { urls: "turns:global.relay.metered.ca:443?transport=tcp", username: "ac2c93513b982ade0cd857b1", credential: "eKC+3dSGWH6uzm5t" },
+        ]
       }
-    };
-
-    // Recevoir le stream distant
-    pc.ontrack = (e) => {
-      const stream = e.streams[0];
-      if (!stream) return;
-      // Supprimer ancien élément audio si existe
+    });
+    peer.on("signal", signal => s.emit("signal", { to: peerId, signal }));
+    peer.on("stream", stream => {
       const old = document.getElementById("audio-" + peerId);
       if (old) old.remove();
       const audio = document.createElement("audio");
@@ -374,18 +311,9 @@ function ChatApp({ auth, onLogout }) {
       audio.playsInline = true;
       audio.srcObject = stream;
       document.body.appendChild(audio);
-    };
-
-    peersRef.current[peerId] = { pc, username };
-
-    // Si initiateur, créer l'offre
-    if (initiator) {
-      try {
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        s.emit("signal", { to: peerId, signal: pc.localDescription });
-      } catch(e) { console.error("Offer error:", e); }
-    }
+    });
+    peer.on("error", e => console.error("SimplePeer error:", e));
+    peersRef.current[peerId] = { peer, username };
   };
 
   const toggleMute = () => {

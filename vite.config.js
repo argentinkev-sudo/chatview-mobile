@@ -8,6 +8,15 @@ export default defineConfig({
     port: 5173,
   },
   define: {
-    global: 'globalThis', // Needed for simple-peer
+    global: 'globalThis',
+    'process.env': {},
   },
+  resolve: {
+    alias: {
+      process: 'process/browser',
+      buffer: 'buffer',
+      util: 'util',
+      events: 'events',
+    }
+  }
 })
