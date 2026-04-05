@@ -177,27 +177,34 @@ function ChatApp({ auth, onLogout }) {
       joinSound.play().catch(()=>{});
     });
     s.on("signal", async ({ from, signal }) => {
-      // Créer le peer si pas encore existant (cas où bureau envoie l'offre en premier)
+      console.log("📡 Signal reçu de", from, "type:", signal.type, "candidate:", !!signal.candidate, "full:", JSON.stringify(signal).substring(0,200));
       if (!peersRef.current[from]) {
+        console.log("🆕 Création peer pour", from);
         await createPeerNative(from, false, "unknown", s);
       }
       const peerData = peersRef.current[from];
       if (!peerData) return;
       const pc = peerData.pc;
+      console.log("📶 signalingState avant:", pc.signalingState);
       try {
         if (signal.type === "offer") {
           await pc.setRemoteDescription(new RTCSessionDescription(signal));
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
           s.emit("signal", { to: from, signal: pc.localDescription });
+          console.log("✅ Answer envoyé");
         } else if (signal.type === "answer") {
           if (pc.signalingState === "have-local-offer") {
             await pc.setRemoteDescription(new RTCSessionDescription(signal));
+            console.log("✅ Answer reçu et appliqué");
           }
         } else if (signal.candidate !== undefined) {
           try {
             if (signal.candidate) await pc.addIceCandidate(new RTCIceCandidate(signal));
-          } catch(e) { /* ignore ice errors */ }
+            console.log("✅ ICE candidate ajouté");
+          } catch(e) { console.warn("ICE error:", e.message); }
+        } else {
+          console.warn("❓ Signal inconnu:", signal);
         }
       } catch(e) { console.error("Signal error:", e); }
     });
