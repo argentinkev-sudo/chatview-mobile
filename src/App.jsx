@@ -136,6 +136,9 @@ function ChatApp({ auth, onLogout }) {
   const [isMuted, setIsMuted] = useState(false);
   const [isDeafened, setIsDeafened] = useState(false);
   const [voiceUsers, setVoiceUsers] = useState([]);
+  const [speakingUsers, setSpeakingUsers] = useState(new Set()); // qui parle
+  const audioContextRef = useRef(null);
+  const notificationSoundRef = useRef(new Audio("https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3"));
 
   // ── Init socket ──
   useEffect(() => {
@@ -147,7 +150,17 @@ function ChatApp({ auth, onLogout }) {
       if (msg.channelId === currentChannelRef.current) {
         setMessages(prev => [...prev, msg]);
       } else {
-        setUnreadCounts(prev => ({ ...prev, [msg.channelId]: (prev[msg.channelId]||0)+1 }));
+        setUnreadCounts(prev => {
+          const next = { ...prev, [msg.channelId]: (prev[msg.channelId]||0)+1 };
+          // Badge PWA sur l'icône
+          const total = Object.values(next).reduce((a,b)=>a+b,0);
+          if (navigator.setAppBadge) navigator.setAppBadge(total).catch(()=>{});
+          return next;
+        });
+        // Son de notification
+        if (msg.username !== auth.username) {
+          notificationSoundRef.current.play().catch(()=>{});
+        }
       }
     });
     s.on("message_edited", ({ messageId, content, edited }) => {
@@ -247,7 +260,13 @@ function ChatApp({ auth, onLogout }) {
   // ── Join text channel ──
   const joinTextChannel = (ch) => {
     setCurrentChannel(ch.id);
-    setUnreadCounts(prev => ({ ...prev, [ch.id]: 0 }));
+    setUnreadCounts(prev => {
+      const next = { ...prev, [ch.id]: 0 };
+      const total = Object.values(next).reduce((a,b)=>a+b,0);
+      if (total === 0 && navigator.clearAppBadge) navigator.clearAppBadge().catch(()=>{});
+      else if (navigator.setAppBadge) navigator.setAppBadge(total).catch(()=>{});
+      return next;
+    });
     setMessages([]);
     socketRef.current.emit("join_channel", ch.id);
     setView("chat");
@@ -267,6 +286,29 @@ function ChatApp({ auth, onLogout }) {
       currentVoiceChannelRef.current = ch.id;
       socketRef.current.emit("join_voice", ch.id);
       joinSound.play().catch(()=>{});
+
+      // ── Analyser micro local pour rond vert ──
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      audioContextRef.current = ctx;
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      const source = ctx.createMediaStreamSource(stream);
+      source.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const checkLevel = () => {
+        if (!currentVoiceChannelRef.current) return;
+        analyser.getByteFrequencyData(data);
+        const avg = data.reduce((a,b)=>a+b,0) / data.length;
+        setSpeakingUsers(prev => {
+          const next = new Set(prev);
+          if (avg > 15) next.add("__me__");
+          else next.delete("__me__");
+          return next;
+        });
+        requestAnimationFrame(checkLevel);
+      };
+      checkLevel();
+
       setView("voice");
       setShowSidebar(false);
     } catch { alert("Impossible d'accéder au micro !"); }
@@ -276,11 +318,13 @@ function ChatApp({ auth, onLogout }) {
     if (!currentVoiceChannel) return;
     socketRef.current.emit("leave_voice", currentVoiceChannel);
     if (localStreamRef.current) { localStreamRef.current.getTracks().forEach(t=>t.stop()); localStreamRef.current = null; }
+    if (audioContextRef.current) { audioContextRef.current.close(); audioContextRef.current = null; }
     Object.keys(peersRef.current).forEach(id => { peersRef.current[id].peer.destroy(); });
     peersRef.current = {};
     document.querySelectorAll(".remote-audio-el").forEach(a => a.remove());
     setCurrentVoiceChannel(null);
     setVoiceUsers([]);
+    setSpeakingUsers(new Set());
     leaveSound.play().catch(()=>{});
     setView("channels");
   };
@@ -420,6 +464,7 @@ function ChatApp({ auth, onLogout }) {
             onToggleDeafen={toggleDeafen}
             onLeave={leaveVoice}
             onBack={()=>setView("channels")}
+            speakingUsers={speakingUsers}
           />
         )}
         {view === "members" && (
@@ -798,7 +843,9 @@ function MessageItem({ msg, myUsername, myRole, isAdmin, onDelete, onEdit, onRea
 }
 
 // ─── VOICE VIEW ───────────────────────────────────────────────────────────────
-function VoiceView({ channel, voiceUsers, auth, isMuted, isDeafened, onToggleMute, onToggleDeafen, onLeave, onBack }) {
+function VoiceView({ channel, voiceUsers, auth, isMuted, isDeafened, onToggleMute, onToggleDeafen, onLeave, onBack, speakingUsers }) {
+  const isMeSpeaking = speakingUsers?.has("__me__") && !isMuted;
+
   return (
     <div className="voice-view">
       <div className="voice-header">
@@ -811,8 +858,8 @@ function VoiceView({ channel, voiceUsers, auth, isMuted, isDeafened, onToggleMut
 
       <div className="voice-users-grid">
         {/* Me */}
-        <div className={`voice-user-card ${isMuted?"muted":""}`}>
-          <div className="voice-user-avatar-wrap">
+        <div className={`voice-user-card ${isMuted?"muted":""} ${isMeSpeaking?"speaking":""}`}>
+          <div className={`voice-user-avatar-wrap ${isMeSpeaking?"speaking-ring":""}`}>
             <Avatar av={auth.avatar} username={auth.username} size={64} />
             {isMuted && <span className="voice-muted-badge">🔇</span>}
           </div>
@@ -822,9 +869,10 @@ function VoiceView({ channel, voiceUsers, auth, isMuted, isDeafened, onToggleMut
         {/* Other users */}
         {voiceUsers.filter(u=>(u.username||u)!==auth.username).map((u,i) => {
           const username = u.username || u;
+          const isSpeaking = speakingUsers?.has(username);
           return (
-            <div key={i} className="voice-user-card">
-              <div className="voice-user-avatar-wrap">
+            <div key={i} className={`voice-user-card ${isSpeaking?"speaking":""}`}>
+              <div className={`voice-user-avatar-wrap ${isSpeaking?"speaking-ring":""}`}>
                 <Avatar av={u.avatar} username={username} size={64} />
               </div>
               <span className="voice-user-name">{username}</span>

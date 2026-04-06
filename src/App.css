@@ -817,7 +817,23 @@ a { color: var(--accent); text-decoration: underline; }
   border: 1.5px solid var(--border);
   transition: border-color 0.2s;
 }
-.voice-user-card.muted { border-color: rgba(242,63,66,0.3); }
+.voice-user-card.speaking {
+  border-color: var(--green);
+  box-shadow: 0 0 0 2px rgba(35,165,89,0.3);
+}
+
+.voice-user-avatar-wrap.speaking-ring {
+  border-radius: 50%;
+  padding: 3px;
+  background: transparent;
+  box-shadow: 0 0 0 3px var(--green);
+  animation: speaking-pulse 0.8s ease-in-out infinite;
+}
+
+@keyframes speaking-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px var(--green); }
+  50% { box-shadow: 0 0 0 6px rgba(35,165,89,0.4); }
+}
 
 .voice-user-avatar-wrap {
   position: relative;
