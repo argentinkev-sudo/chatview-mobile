@@ -136,7 +136,9 @@ function ChatApp({ auth, onLogout }) {
   const [isMuted, setIsMuted] = useState(false);
   const [isDeafened, setIsDeafened] = useState(false);
   const [voiceUsers, setVoiceUsers] = useState([]);
-  const [speakingUsers, setSpeakingUsers] = useState(new Set()); // qui parle
+  const [speakingUsers, setSpeakingUsers] = useState(new Set());
+  const [activeStreams, setActiveStreams] = useState({}); // { peerId: { stream, username } }
+  const [watchingStream, setWatchingStream] = useState(null); // peerId du stream à regarder
   const audioContextRef = useRef(null);
   const notificationSoundRef = useRef(new Audio("https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3"));
 
@@ -325,6 +327,8 @@ function ChatApp({ auth, onLogout }) {
     setCurrentVoiceChannel(null);
     setVoiceUsers([]);
     setSpeakingUsers(new Set());
+    setActiveStreams({});
+    setWatchingStream(null);
     leaveSound.play().catch(()=>{});
     setView("channels");
   };
@@ -346,15 +350,22 @@ function ChatApp({ auth, onLogout }) {
     });
     peer.on("signal", signal => s.emit("signal", { to: peerId, signal }));
     peer.on("stream", stream => {
-      const old = document.getElementById("audio-" + peerId);
-      if (old) old.remove();
-      const audio = document.createElement("audio");
-      audio.id = "audio-" + peerId;
-      audio.className = "remote-audio-el";
-      audio.autoplay = true;
-      audio.playsInline = true;
-      audio.srcObject = stream;
-      document.body.appendChild(audio);
+      const hasVideo = stream.getVideoTracks().length > 0;
+      if (hasVideo) {
+        // Stream vidéo — partage d'écran
+        setActiveStreams(prev => ({ ...prev, [peerId]: { stream, username } }));
+      } else {
+        // Audio seulement
+        const old = document.getElementById("audio-" + peerId);
+        if (old) old.remove();
+        const audio = document.createElement("audio");
+        audio.id = "audio-" + peerId;
+        audio.className = "remote-audio-el";
+        audio.autoplay = true;
+        audio.playsInline = true;
+        audio.srcObject = stream;
+        document.body.appendChild(audio);
+      }
     });
     peer.on("error", e => console.error("SimplePeer error:", e));
     peersRef.current[peerId] = { peer, username };
@@ -465,6 +476,9 @@ function ChatApp({ auth, onLogout }) {
             onLeave={leaveVoice}
             onBack={()=>setView("channels")}
             speakingUsers={speakingUsers}
+            activeStreams={activeStreams}
+            watchingStream={watchingStream}
+            onWatchStream={setWatchingStream}
           />
         )}
         {view === "members" && (
@@ -843,8 +857,9 @@ function MessageItem({ msg, myUsername, myRole, isAdmin, onDelete, onEdit, onRea
 }
 
 // ─── VOICE VIEW ───────────────────────────────────────────────────────────────
-function VoiceView({ channel, voiceUsers, auth, isMuted, isDeafened, onToggleMute, onToggleDeafen, onLeave, onBack, speakingUsers }) {
+function VoiceView({ channel, voiceUsers, auth, isMuted, isDeafened, onToggleMute, onToggleDeafen, onLeave, onBack, speakingUsers, activeStreams, watchingStream, onWatchStream }) {
   const isMeSpeaking = speakingUsers?.has("__me__") && !isMuted;
+  const streamEntries = Object.entries(activeStreams || {});
 
   return (
     <div className="voice-view">
@@ -854,7 +869,21 @@ function VoiceView({ channel, voiceUsers, auth, isMuted, isDeafened, onToggleMut
           <span className="voice-live-dot" />
           <span>{channel?.name || "Vocal"}</span>
         </div>
+        {streamEntries.length > 0 && (
+          <button className="stream-watch-btn" onClick={()=>onWatchStream(streamEntries[0][0])}>
+            🖥️ Stream
+          </button>
+        )}
       </div>
+
+      {/* Visionneuse stream */}
+      {watchingStream && activeStreams[watchingStream] && (
+        <StreamViewer
+          stream={activeStreams[watchingStream].stream}
+          username={activeStreams[watchingStream].username}
+          onClose={()=>onWatchStream(null)}
+        />
+      )}
 
       <div className="voice-users-grid">
         {/* Me */}
@@ -870,12 +899,20 @@ function VoiceView({ channel, voiceUsers, auth, isMuted, isDeafened, onToggleMut
         {voiceUsers.filter(u=>(u.username||u)!==auth.username).map((u,i) => {
           const username = u.username || u;
           const isSpeaking = speakingUsers?.has(username);
+          const isStreaming = streamEntries.some(([,s])=>s.username===username);
           return (
             <div key={i} className={`voice-user-card ${isSpeaking?"speaking":""}`}>
               <div className={`voice-user-avatar-wrap ${isSpeaking?"speaking-ring":""}`}>
                 <Avatar av={u.avatar} username={username} size={64} />
+                {isStreaming && <span className="stream-badge">🔴</span>}
               </div>
               <span className="voice-user-name">{username}</span>
+              {isStreaming && (
+                <button className="watch-stream-btn" onClick={()=>{
+                  const entry = streamEntries.find(([,s])=>s.username===username);
+                  if (entry) onWatchStream(entry[0]);
+                }}>Voir le stream</button>
+              )}
             </div>
           );
         })}
@@ -895,6 +932,32 @@ function VoiceView({ channel, voiceUsers, auth, isMuted, isDeafened, onToggleMut
           <span>Quitter</span>
         </button>
       </div>
+    </div>
+  );
+}
+
+// ─── STREAM VIEWER ────────────────────────────────────────────────────────────
+function StreamViewer({ stream, username, onClose }) {
+  const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (videoRef.current && stream) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [stream]);
+
+  return (
+    <div className="stream-viewer-overlay">
+      <div className="stream-viewer-header">
+        <span>🔴 Stream de {username}</span>
+        <button onClick={onClose}>✕</button>
+      </div>
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        className="stream-viewer-video"
+      />
     </div>
   );
 }
