@@ -117,7 +117,7 @@ function AuthScreen({ onAuth }) {
 // ─── CHAT APP ────────────────────────────────────────────────────────────────
 function ChatApp({ auth, onLogout }) {
   const socketRef = useRef(null);
-  const [view, setView] = useState("channels"); // channels | chat | voice | members
+  const [view, setView] = useState("channels");
   const [channels, setChannels] = useState({ text: [], voice: [] });
   const [currentChannel, setCurrentChannel] = useState(null);
   const [currentVoiceChannel, setCurrentVoiceChannel] = useState(null);
@@ -137,10 +137,26 @@ function ChatApp({ auth, onLogout }) {
   const [isDeafened, setIsDeafened] = useState(false);
   const [voiceUsers, setVoiceUsers] = useState([]);
   const [speakingUsers, setSpeakingUsers] = useState(new Set());
-  const [activeStreams, setActiveStreams] = useState({}); // { peerId: { stream, username } }
-  const [watchingStream, setWatchingStream] = useState(null); // peerId du stream à regarder
+  const [activeStreams, setActiveStreams] = useState({});
+  const [watchingStream, setWatchingStream] = useState(null);
   const audioContextRef = useRef(null);
   const notificationSoundRef = useRef(new Audio("https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3"));
+
+  // ── Service Worker + Permission Notifications ──
+  useEffect(() => {
+    // Enregistrer le Service Worker
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/sw.js").then((reg) => {
+        console.log("✅ SW enregistré");
+      }).catch(e => console.error("SW error:", e));
+    }
+    // Demander permission notifications
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission().then(perm => {
+        console.log("Notif permission:", perm);
+      });
+    }
+  }, []);
 
   // ── Init socket ──
   useEffect(() => {
@@ -154,7 +170,6 @@ function ChatApp({ auth, onLogout }) {
       } else {
         setUnreadCounts(prev => {
           const next = { ...prev, [msg.channelId]: (prev[msg.channelId]||0)+1 };
-          // Badge PWA sur l'icône
           const total = Object.values(next).reduce((a,b)=>a+b,0);
           if (navigator.setAppBadge) navigator.setAppBadge(total).catch(()=>{});
           return next;
@@ -162,6 +177,22 @@ function ChatApp({ auth, onLogout }) {
         // Son de notification
         if (msg.username !== auth.username) {
           notificationSoundRef.current.play().catch(()=>{});
+          // Notification système
+          if ("Notification" in window && Notification.permission === "granted") {
+            navigator.serviceWorker.ready.then(reg => {
+              reg.showNotification(`#${msg.channelId} — ${msg.username}`, {
+                body: msg.content || "Nouveau message",
+                icon: "/icons/icon-192.png",
+                badge: "/icons/icon-192.png",
+                vibrate: [200, 100, 200],
+                tag: msg.channelId,
+                renotify: true,
+              });
+            }).catch(() => {
+              // Fallback notification simple
+              new Notification(`${msg.username}`, { body: msg.content || "Nouveau message" });
+            });
+          }
         }
       }
     });
