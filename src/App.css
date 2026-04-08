@@ -887,18 +887,20 @@ a { color: var(--accent); text-decoration: underline; }
   justify-content: space-between;
   padding: 12px 16px;
   padding-top: calc(12px + env(safe-area-inset-top));
-  background: rgba(0,0,0,0.8);
+  background: rgba(0,0,0,0.85);
   color: #fff;
   font-size: 14px;
   font-weight: 600;
+  flex-shrink: 0;
+  z-index: 1;
 }
 
 .stream-viewer-header button {
   color: #fff;
-  font-size: 20px;
+  font-size: 18px;
   width: 32px; height: 32px;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.15);
   border-radius: 50%;
 }
 
@@ -908,24 +910,25 @@ a { color: var(--accent); text-decoration: underline; }
   height: 100%;
   object-fit: contain;
   background: #000;
+  display: block;
 }
 
-/* Mode paysage */
-@media (orientation: landscape) {
-  .stream-viewer-overlay {
-    flex-direction: row;
-    flex-wrap: wrap;
-  }
-  .stream-viewer-header {
-    width: 100%;
-    padding-top: 8px;
-    padding-left: max(16px, env(safe-area-inset-left));
-    padding-right: max(16px, env(safe-area-inset-right));
-  }
-  .stream-viewer-video {
-    width: 100%;
-    flex: 1;
-  }
+.stream-viewer-hint {
+  text-align: center;
+  padding: 6px;
+  font-size: 11px;
+  color: rgba(255,255,255,0.4);
+  background: rgba(0,0,0,0.85);
+  flex-shrink: 0;
+}
+
+/* Plein écran natif */
+.stream-viewer-video:fullscreen,
+.stream-viewer-video:-webkit-full-screen {
+  width: 100vw;
+  height: 100vh;
+  object-fit: contain;
+  background: #000;
 }
 
 .voice-user-avatar-wrap {

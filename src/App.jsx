@@ -970,6 +970,7 @@ function VoiceView({ channel, voiceUsers, auth, isMuted, isDeafened, onToggleMut
 // ─── STREAM VIEWER ────────────────────────────────────────────────────────────
 function StreamViewer({ stream, username, onClose }) {
   const videoRef = useRef(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
     if (videoRef.current && stream) {
@@ -977,18 +978,55 @@ function StreamViewer({ stream, username, onClose }) {
     }
   }, [stream]);
 
+  const toggleFullscreen = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (!isFullscreen) {
+      if (video.requestFullscreen) video.requestFullscreen();
+      else if (video.webkitRequestFullscreen) video.webkitRequestFullscreen();
+      else if (video.mozRequestFullScreen) video.mozRequestFullScreen();
+    } else {
+      if (document.exitFullscreen) document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    }
+    setIsFullscreen(f => !f);
+  };
+
+  // Détecter quand on sort du fullscreen via le bouton natif
+  useEffect(() => {
+    const handler = () => {
+      if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+        setIsFullscreen(false);
+      }
+    };
+    document.addEventListener("fullscreenchange", handler);
+    document.addEventListener("webkitfullscreenchange", handler);
+    return () => {
+      document.removeEventListener("fullscreenchange", handler);
+      document.removeEventListener("webkitfullscreenchange", handler);
+    };
+  }, []);
+
   return (
     <div className="stream-viewer-overlay">
       <div className="stream-viewer-header">
         <span>🔴 Stream de {username}</span>
-        <button onClick={onClose}>✕</button>
+        <div style={{display:"flex",gap:8}}>
+          <button onClick={toggleFullscreen} title="Plein écran">
+            {isFullscreen ? "⊡" : "⛶"}
+          </button>
+          <button onClick={onClose}>✕</button>
+        </div>
       </div>
       <video
         ref={videoRef}
         autoPlay
         playsInline
         className="stream-viewer-video"
+        onClick={toggleFullscreen}
+        style={{cursor:"pointer"}}
       />
+      <div className="stream-viewer-hint">Appuie sur la vidéo pour le plein écran</div>
     </div>
   );
 }
