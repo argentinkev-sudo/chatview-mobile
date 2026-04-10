@@ -142,6 +142,13 @@ function ChatApp({ auth, onLogout }) {
   const audioContextRef = useRef(null);
   const notificationSoundRef = useRef(new Audio("https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3"));
 
+  // Amis & MP
+  const [friends, setFriends] = useState([]);
+  const [friendRequests, setFriendRequests] = useState([]);
+  const [currentPMUser, setCurrentPMUser] = useState(null);
+  const [pmMessages, setPmMessages] = useState([]);
+  const [unreadPMs, setUnreadPMs] = useState({});
+
   // ── Service Worker + Permission Notifications ──
   useEffect(() => {
     // Enregistrer le Service Worker
@@ -254,14 +261,125 @@ function ChatApp({ auth, onLogout }) {
     checkAdmin(auth.token);
     fetchAllUsers();
 
+    // Listener MP reçu
+    s.on("pm_received", (msg) => {
+      if (currentPMUserRef.current === msg.from) {
+        setPmMessages(prev => [...prev, msg]);
+      } else {
+        setUnreadPMs(prev => ({ ...prev, [msg.from]: (prev[msg.from]||0)+1 }));
+        notificationSoundRef.current.play().catch(()=>{});
+        if ("Notification" in window && Notification.permission === "granted") {
+          navigator.serviceWorker?.ready.then(reg => {
+            reg.showNotification(`💬 ${msg.from}`, {
+              body: msg.content,
+              icon: "/icons/icon-192.png",
+              vibrate: [200,100,200],
+              tag: "pm-" + msg.from,
+              renotify: true,
+            });
+          }).catch(()=>{});
+        }
+      }
+    });
+
     return () => s.disconnect();
   }, []);
 
   // Refs for closures
   const currentChannelRef = useRef(null);
   const currentVoiceChannelRef = useRef(null);
+  const currentPMUserRef = useRef(null);
   useEffect(() => { currentChannelRef.current = currentChannel; }, [currentChannel]);
   useEffect(() => { currentVoiceChannelRef.current = currentVoiceChannel; }, [currentVoiceChannel]);
+  useEffect(() => { currentPMUserRef.current = currentPMUser; }, [currentPMUser]);
+
+  // ── Fonctions Amis ──
+  const loadFriends = async () => {
+    try {
+      const res = await fetch(SERVER_URL + "/my-friends", {
+        headers: { Authorization: "Bearer " + auth.token }
+      });
+      const data = await res.json();
+      setFriends(data.friends || []);
+      setFriendRequests(data.requests || []);
+    } catch(e) { console.error(e); }
+  };
+
+  const sendFriendRequest = async (username) => {
+    const res = await fetch(SERVER_URL + "/send-friend-request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + auth.token },
+      body: JSON.stringify({ targetUsername: username })
+    });
+    const data = await res.json();
+    return data;
+  };
+
+  const acceptFriendRequest = async (requestId) => {
+    await fetch(SERVER_URL + "/accept-friend-request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + auth.token },
+      body: JSON.stringify({ requestId })
+    });
+    loadFriends();
+  };
+
+  const rejectFriendRequest = async (requestId) => {
+    await fetch(SERVER_URL + "/reject-friend-request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + auth.token },
+      body: JSON.stringify({ requestId })
+    });
+    loadFriends();
+  };
+
+  const openPM = async (friendUsername) => {
+    setCurrentPMUser(friendUsername);
+    currentPMUserRef.current = friendUsername;
+    setUnreadPMs(prev => ({ ...prev, [friendUsername]: 0 }));
+    try {
+      const res = await fetch(SERVER_URL + "/load-pm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + auth.token },
+        body: JSON.stringify({ friendUsername })
+      });
+      const msgs = await res.json();
+      setPmMessages(msgs);
+    } catch(e) { console.error(e); }
+    setView("pm");
+  };
+
+  const sendPM = async (content) => {
+    if (!content || !currentPMUser) return;
+    const res = await fetch(SERVER_URL + "/send-pm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + auth.token },
+      body: JSON.stringify({ to: currentPMUser, content })
+    });
+    const data = await res.json();
+    if (data.success) {
+      setPmMessages(prev => [...prev, data.message]);
+      socketRef.current.emit("pm_sent", { to: currentPMUser, message: data.message });
+    }
+  };
+
+  const deletePM = async (messageId) => {
+    await fetch(SERVER_URL + "/delete-pm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + auth.token },
+      body: JSON.stringify({ messageId })
+    });
+    setPmMessages(prev => prev.filter(m => m._id !== messageId));
+  };
+
+  const editPM = async (messageId, newContent) => {
+    await fetch(SERVER_URL + "/edit-pm", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: "Bearer " + auth.token },
+      body: JSON.stringify({ messageId, newContent })
+    });
+    setPmMessages(prev => prev.map(m => m._id === messageId ? {...m, content: newContent, edited: true} : m));
+  };
 
   const loadChannels = async (s, token) => {
     try {
@@ -512,6 +630,31 @@ function ChatApp({ auth, onLogout }) {
             onWatchStream={setWatchingStream}
           />
         )}
+        {view === "friends" && (
+          <FriendsView
+            auth={auth}
+            friends={friends}
+            friendRequests={friendRequests}
+            onlineUsers={onlineUsers}
+            unreadPMs={unreadPMs}
+            onLoadFriends={loadFriends}
+            onSendRequest={sendFriendRequest}
+            onAccept={acceptFriendRequest}
+            onReject={rejectFriendRequest}
+            onOpenPM={openPM}
+          />
+        )}
+        {view === "pm" && (
+          <PMView
+            friendUsername={currentPMUser}
+            messages={pmMessages}
+            auth={auth}
+            onSend={sendPM}
+            onDelete={deletePM}
+            onEdit={editPM}
+            onBack={()=>setView("friends")}
+          />
+        )}
         {view === "members" && (
           <MembersView
             allUsers={allUsers}
@@ -535,13 +678,23 @@ function ChatApp({ auth, onLogout }) {
         <button className={view==="channels"?"active":""} onClick={()=>setView("channels")}>
           <span className="nav-icon">💬</span>
           <span>Salons</span>
+          {Object.values(unreadCounts).reduce((a,b)=>a+b,0) > 0 && (
+            <span className="nav-badge">{Object.values(unreadCounts).reduce((a,b)=>a+b,0)}</span>
+          )}
+        </button>
+        <button className={view==="friends"||view==="pm"?"active":""} onClick={()=>{ loadFriends(); setView("friends"); }}>
+          <span className="nav-icon">👥</span>
+          <span>Amis</span>
+          {Object.values(unreadPMs).reduce((a,b)=>a+b,0) > 0 && (
+            <span className="nav-badge">{Object.values(unreadPMs).reduce((a,b)=>a+b,0)}</span>
+          )}
         </button>
         <button onClick={()=>setShowSidebar(true)}>
           <span className="nav-icon">☰</span>
           <span>Menu</span>
         </button>
-        <button className={view==="members"?"active":""} onClick={()=>setView(view==="chat"?"members":"channels")}>
-          <span className="nav-icon">👥</span>
+        <button className={view==="members"?"active":""} onClick={()=>setView("members")}>
+          <span className="nav-icon">🟢</span>
           <span>Membres</span>
           {Object.values(onlineUsers).length > 0 && (
             <span className="nav-badge">{Object.values(onlineUsers).length}</span>
@@ -1027,6 +1180,188 @@ function StreamViewer({ stream, username, onClose }) {
         style={{cursor:"pointer"}}
       />
       <div className="stream-viewer-hint">Appuie sur la vidéo pour le plein écran</div>
+    </div>
+  );
+}
+
+// ─── FRIENDS VIEW ─────────────────────────────────────────────────────────────
+function FriendsView({ auth, friends, friendRequests, onlineUsers, unreadPMs, onLoadFriends, onSendRequest, onAccept, onReject, onOpenPM }) {
+  const [showAddFriend, setShowAddFriend] = useState(false);
+  const [searchUsername, setSearchUsername] = useState("");
+  const [searchMsg, setSearchMsg] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => { onLoadFriends(); }, []);
+
+  const handleSendRequest = async () => {
+    if (!searchUsername.trim()) return;
+    setLoading(true);
+    const data = await onSendRequest(searchUsername.trim());
+    setSearchMsg(data.success ? "✅ Demande envoyée !" : "❌ " + (data.error || "Erreur"));
+    setLoading(false);
+    if (data.success) { setSearchUsername(""); setTimeout(()=>setSearchMsg(""),3000); }
+  };
+
+  return (
+    <div className="friends-view">
+      <div className="friends-header">
+        <h2>Amis</h2>
+        <button className="add-friend-btn" onClick={()=>setShowAddFriend(v=>!v)}>➕</button>
+      </div>
+
+      {showAddFriend && (
+        <div className="add-friend-bar">
+          <input
+            placeholder="Nom d'utilisateur..."
+            value={searchUsername}
+            onChange={e=>setSearchUsername(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&handleSendRequest()}
+          />
+          <button onClick={handleSendRequest} disabled={loading}>
+            {loading ? "..." : "Envoyer"}
+          </button>
+          {searchMsg && <p className={`friend-search-msg ${searchMsg.startsWith("✅")?"success":"error"}`}>{searchMsg}</p>}
+        </div>
+      )}
+
+      {/* Demandes reçues */}
+      {friendRequests.length > 0 && (
+        <div className="friends-section">
+          <div className="friends-section-title">DEMANDES — {friendRequests.length}</div>
+          {friendRequests.map(req => (
+            <div key={req._id} className="friend-request-item">
+              <span className="friend-request-from">👤 {req.from}</span>
+              <div className="friend-request-btns">
+                <button className="accept-btn" onClick={()=>onAccept(req._id)}>✓</button>
+                <button className="reject-btn" onClick={()=>onReject(req._id)}>✗</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Liste amis */}
+      <div className="friends-section">
+        <div className="friends-section-title">AMIS — {friends.length}</div>
+        {friends.length === 0 && (
+          <div className="friends-empty">
+            <span>👥</span>
+            <p>Aucun ami pour l'instant.<br/>Ajoute quelqu'un avec ➕</p>
+          </div>
+        )}
+        {friends.map(friend => {
+          const isOnline = !!onlineUsers[friend.username];
+          const unread = unreadPMs[friend.username] || 0;
+          return (
+            <div key={friend.username} className="friend-item" onClick={()=>onOpenPM(friend.username)}>
+              <div className="friend-avatar-wrap">
+                <Avatar av={friend.avatar} username={friend.username} size={42} />
+                <span className={`status-dot ${isOnline?"online":"offline"}`} />
+              </div>
+              <div className="friend-info">
+                <span className="friend-name">{friend.username}</span>
+                <span className="friend-status">{isOnline ? "En ligne" : "Hors ligne"}</span>
+              </div>
+              <div className="friend-actions">
+                {unread > 0 && <span className="pm-badge">{unread > 99 ? "99+" : unread}</span>}
+                <span className="friend-chat-icon">💬</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── PM VIEW ──────────────────────────────────────────────────────────────────
+function PMView({ friendUsername, messages, auth, onSend, onDelete, onEdit, onBack }) {
+  const [input, setInput] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editText, setEditText] = useState("");
+  const messagesEndRef = useRef(null);
+
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
+
+  const send = () => {
+    const t = input.trim();
+    if (!t) return;
+    onSend(t);
+    setInput("");
+  };
+
+  const saveEdit = () => {
+    if (editText.trim()) onEdit(editingId, editText.trim());
+    setEditingId(null);
+  };
+
+  return (
+    <div className="chat-view">
+      <div className="chat-header">
+        <button className="back-btn" onClick={onBack}>‹</button>
+        <div className="chat-header-info">
+          <span style={{fontSize:18}}>💬</span>
+          <span className="chat-header-name">{friendUsername}</span>
+        </div>
+      </div>
+
+      <div className="messages-area">
+        {messages.length === 0 && (
+          <div className="messages-empty">
+            <span>💬</span>
+            <p>Début de votre conversation avec<br/><strong>{friendUsername}</strong></p>
+          </div>
+        )}
+        {messages.map((msg, i) => {
+          const isMine = msg.from === auth.username;
+          const [showActions, setShowActions] = useState(false);
+          return (
+            <div key={msg._id || i} className={`message-item ${isMine?"mine":""}`} onClick={()=>setShowActions(v=>!v)}>
+              <div className="msg-avatar-col">
+                <Avatar av={isMine ? auth.avatar : null} username={isMine ? auth.username : friendUsername} size={32} />
+              </div>
+              <div className="msg-main">
+                <div className="msg-header-row">
+                  <span className="msg-username">{isMine ? auth.username : friendUsername}</span>
+                  <span className="msg-time">{formatDate(msg.timestamp)}</span>
+                  {msg.edited && <span className="msg-edited">(modifié)</span>}
+                </div>
+                <div className="msg-content-wrap">{msg.content}</div>
+                {showActions && isMine && (
+                  <div className="msg-action-row" onClick={e=>e.stopPropagation()}>
+                    <button onClick={()=>{ setEditingId(msg._id); setEditText(msg.content); setShowActions(false); }}>✏️</button>
+                    <button className="danger" onClick={()=>{ onDelete(msg._id); setShowActions(false); }}>🗑️</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {editingId && (
+        <div className="edit-overlay">
+          <div className="edit-modal">
+            <p>Modifier le message</p>
+            <textarea value={editText} onChange={e=>setEditText(e.target.value)} autoFocus />
+            <div className="edit-modal-btns">
+              <button onClick={()=>setEditingId(null)}>Annuler</button>
+              <button className="primary" onClick={saveEdit}>Sauvegarder</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className="chat-input-bar">
+        <input
+          value={input}
+          onChange={e=>setInput(e.target.value)}
+          onKeyDown={e=>{ if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();} }}
+          placeholder={`Message à ${friendUsername}...`}
+        />
+        <button className="send-btn" onClick={send} disabled={!input.trim()}>➤</button>
+      </div>
     </div>
   );
 }
