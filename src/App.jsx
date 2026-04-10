@@ -1274,6 +1274,34 @@ function FriendsView({ auth, friends, friendRequests, onlineUsers, unreadPMs, on
   );
 }
 
+// ─── PM MESSAGE ITEM ──────────────────────────────────────────────────────────
+function PMMessageItem({ msg, auth, friendUsername, onDelete, onEdit }) {
+  const [showActions, setShowActions] = useState(false);
+  const isMine = msg.from === auth.username;
+
+  return (
+    <div className={`message-item ${isMine?"mine":""}`} onClick={()=>setShowActions(v=>!v)}>
+      <div className="msg-avatar-col">
+        <Avatar av={isMine ? auth.avatar : null} username={isMine ? auth.username : friendUsername} size={32} />
+      </div>
+      <div className="msg-main">
+        <div className="msg-header-row">
+          <span className="msg-username">{isMine ? auth.username : friendUsername}</span>
+          <span className="msg-time">{formatDate(msg.timestamp)}</span>
+          {msg.edited && <span className="msg-edited">(modifié)</span>}
+        </div>
+        <div className="msg-content-wrap">{msg.content}</div>
+        {showActions && isMine && (
+          <div className="msg-action-row" onClick={e=>e.stopPropagation()}>
+            <button onClick={()=>{ onEdit(msg._id, msg.content); setShowActions(false); }}>✏️</button>
+            <button className="danger" onClick={()=>{ onDelete(msg._id); setShowActions(false); }}>🗑️</button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── PM VIEW ──────────────────────────────────────────────────────────────────
 function PMView({ friendUsername, messages, auth, onSend, onDelete, onEdit, onBack }) {
   const [input, setInput] = useState("");
@@ -1295,6 +1323,11 @@ function PMView({ friendUsername, messages, auth, onSend, onDelete, onEdit, onBa
     setEditingId(null);
   };
 
+  const handleEdit = (id, content) => {
+    setEditingId(id);
+    setEditText(content);
+  };
+
   return (
     <div className="chat-view">
       <div className="chat-header">
@@ -1312,31 +1345,16 @@ function PMView({ friendUsername, messages, auth, onSend, onDelete, onEdit, onBa
             <p>Début de votre conversation avec<br/><strong>{friendUsername}</strong></p>
           </div>
         )}
-        {messages.map((msg, i) => {
-          const isMine = msg.from === auth.username;
-          const [showActions, setShowActions] = useState(false);
-          return (
-            <div key={msg._id || i} className={`message-item ${isMine?"mine":""}`} onClick={()=>setShowActions(v=>!v)}>
-              <div className="msg-avatar-col">
-                <Avatar av={isMine ? auth.avatar : null} username={isMine ? auth.username : friendUsername} size={32} />
-              </div>
-              <div className="msg-main">
-                <div className="msg-header-row">
-                  <span className="msg-username">{isMine ? auth.username : friendUsername}</span>
-                  <span className="msg-time">{formatDate(msg.timestamp)}</span>
-                  {msg.edited && <span className="msg-edited">(modifié)</span>}
-                </div>
-                <div className="msg-content-wrap">{msg.content}</div>
-                {showActions && isMine && (
-                  <div className="msg-action-row" onClick={e=>e.stopPropagation()}>
-                    <button onClick={()=>{ setEditingId(msg._id); setEditText(msg.content); setShowActions(false); }}>✏️</button>
-                    <button className="danger" onClick={()=>{ onDelete(msg._id); setShowActions(false); }}>🗑️</button>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+        {messages.map((msg, i) => (
+          <PMMessageItem
+            key={msg._id || i}
+            msg={msg}
+            auth={auth}
+            friendUsername={friendUsername}
+            onDelete={onDelete}
+            onEdit={handleEdit}
+          />
+        ))}
         <div ref={messagesEndRef} />
       </div>
 
