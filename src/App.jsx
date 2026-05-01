@@ -424,6 +424,9 @@ function ChatApp({ auth, onLogout }) {
     setShowSidebar(false);
   };
 
+  const wakeLockRef = useRef(null);
+  const silenceAudioRef = useRef(null);
+
   // ── Voice ──
   const joinVoiceChannel = async (ch) => {
     if (currentVoiceChannel) await leaveVoice();
@@ -437,6 +440,31 @@ function ChatApp({ auth, onLogout }) {
       currentVoiceChannelRef.current = ch.id;
       socketRef.current.emit("join_voice", ch.id);
       joinSound.play().catch(()=>{});
+
+      // ── Wake Lock — empêcher la veille ──
+      if ("wakeLock" in navigator) {
+        try {
+          wakeLockRef.current = await navigator.wakeLock.request("screen");
+          wakeLockRef.current.addEventListener("release", () => {
+            // Ré-acquérir si toujours en vocal
+            if (currentVoiceChannelRef.current) {
+              navigator.wakeLock.request("screen").then(wl => {
+                wakeLockRef.current = wl;
+              }).catch(()=>{});
+            }
+          });
+        } catch(e) { console.warn("Wake Lock non disponible:", e); }
+      }
+
+      // ── Audio silence en boucle — empêche le navigateur de suspendre l'audio ──
+      const silenceCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = silenceCtx.createOscillator();
+      const gainNode = silenceCtx.createGain();
+      gainNode.gain.value = 0.001; // quasi-silence
+      oscillator.connect(gainNode);
+      gainNode.connect(silenceCtx.destination);
+      oscillator.start();
+      silenceAudioRef.current = silenceCtx;
 
       // ── Analyser micro local pour rond vert ──
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -460,6 +488,26 @@ function ChatApp({ auth, onLogout }) {
       };
       checkLevel();
 
+      // ── Ré-activer le micro si page redevient visible ──
+      const handleVisibilityChange = async () => {
+        if (document.visibilityState === "visible" && currentVoiceChannelRef.current) {
+          // Reprendre l'AudioContext si suspendu
+          if (audioContextRef.current?.state === "suspended") {
+            await audioContextRef.current.resume();
+          }
+          if (silenceAudioRef.current?.state === "suspended") {
+            await silenceAudioRef.current.resume();
+          }
+          // Ré-acquérir Wake Lock si perdu
+          if (!wakeLockRef.current || wakeLockRef.current.released) {
+            try {
+              wakeLockRef.current = await navigator.wakeLock.request("screen");
+            } catch(e) {}
+          }
+        }
+      };
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+
       setView("voice");
       setShowSidebar(false);
     } catch { alert("Impossible d'accéder au micro !"); }
@@ -470,6 +518,9 @@ function ChatApp({ auth, onLogout }) {
     socketRef.current.emit("leave_voice", currentVoiceChannel);
     if (localStreamRef.current) { localStreamRef.current.getTracks().forEach(t=>t.stop()); localStreamRef.current = null; }
     if (audioContextRef.current) { audioContextRef.current.close(); audioContextRef.current = null; }
+    if (silenceAudioRef.current) { silenceAudioRef.current.close(); silenceAudioRef.current = null; }
+    if (wakeLockRef.current) { wakeLockRef.current.release().catch(()=>{}); wakeLockRef.current = null; }
+    document.removeEventListener("visibilitychange", ()=>{});
     Object.keys(peersRef.current).forEach(id => { peersRef.current[id].peer.destroy(); });
     peersRef.current = {};
     document.querySelectorAll(".remote-audio-el").forEach(a => a.remove());
